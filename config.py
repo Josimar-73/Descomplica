@@ -1,0 +1,6 @@
+METABASE_URL = "https://metabase.volologistica.com"
+SESSION_TOKEN = "26240c21-c3aa-4d5f-a6f8-53d3f47f9121"
+
+
+PERGUNTA_ESTOQUE = 7904
+PERGUNTA_PEDIDOS = 9753
