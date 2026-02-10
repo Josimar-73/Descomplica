@@ -47,6 +47,40 @@ with st.spinner("Puxando dados do Metabase..."):
 st.success("Dados carregados!")
 
 # =========================================
+# 🎛️ FILTRO OFICIAL DO RELATÓRIO
+# =========================================
+
+st.sidebar.markdown("## 🎛️ Filtro do Relatório")
+
+# garante texto
+estoque["Estoque"] = estoque["Estoque"].astype(str)
+
+tipos = sorted(estoque["Estoque"].dropna().unique())
+
+tipo_sel = st.sidebar.selectbox(
+    "Tipo de estoque",
+    ["Todos"] + tipos
+)
+
+if tipo_sel != "Todos":
+    estoque = estoque[estoque["Estoque"] == tipo_sel]
+
+st.sidebar.success("Filtro aplicado")
+
+# =====================================
+# FILTRO TIPO ESTOQUE
+# =====================================
+
+if "Tipo de Estoque" in estoque.columns:
+    tipos = sorted(estoque["Tipo de Estoque"].dropna().unique())
+    tipo_sel = st.sidebar.multiselect(
+        "Tipo de Estoque",
+        tipos
+    )
+    if tipo_sel:
+        estoque = estoque[estoque["Tipo de Estoque"].isin(tipo_sel)]
+
+# =========================================
 # LIMPEZA
 # =========================================
 estoque["QTD Disponível"] = pd.to_numeric(estoque["QTD Disponível"], errors="coerce").fillna(0)
