@@ -5,7 +5,19 @@ import plotly.express as px
 from config import *
 
 st.set_page_config(layout="wide")
-st.title("📦 Descomplica")
+st.title("🤖 Descomplica")
+
+st.sidebar.title("☰ MENU")
+
+menu = st.sidebar.radio(
+    "Navegação",
+    [
+        "🐊 Lacoste",
+        "📊 Painel Executivo",
+        "📦 SKUs Críticos",
+        "🧠 Derrubada Inteligente"
+    ]
+)
 
 # =========================================
 # FUNÇÃO CONSULTA METABASE
@@ -129,199 +141,197 @@ final["Saldo_pos"] = (final["M0"] + final["MR"] + final["PP"]) - final["pedido"]
 # 🚨 TORRE DE CONTROLE LOGÍSTICA
 # =========================================
 
-st.markdown("## 🚨 Torre de Controle Operacional")
+if menu == "🐊 Lacoste":
 
-ruptura = final[final["Status"]=="🔴 Possível Ruptura"]
-derrubada = final[final["Status"]=="🟠 Derrubada"]
-armazenagem = final[final["Status"]=="🔵 Armazenagem"]
+    st.markdown("## 🚨 Torre de Controle Operacional")
 
-if len(ruptura) > 0:
-    st.error(f"🚨 RUPTURA: {len(ruptura)} SKUs não atendem pedido")
+    ruptura = final[final["Status"]=="🔴 Possível Ruptura"]
+    derrubada = final[final["Status"]=="🟠 Derrubada"]
+    armazenagem = final[final["Status"]=="🔵 Armazenagem"]
 
-if len(derrubada) > 0:
-    st.warning(f"⚠️ DERRUBADA NECESSÁRIA: {len(derrubada)} SKUs")
+    if len(ruptura) > 0:
+        st.error(f"🚨 RUPTURA: {len(ruptura)} SKUs não atendem pedido")
 
-if len(armazenagem) > 0:
-    st.info(f"🏬 ARMAZENAGEM: {len(armazenagem)} SKUs precisam RE")
+    if len(derrubada) > 0:
+        st.warning(f"⚠️ DERRUBADA NECESSÁRIA: {len(derrubada)} SKUs")
 
-if len(ruptura)==0 and len(derrubada)==0 and len(armazenagem)==0:
-    st.success("🟢 OPERAÇÃO ESTÁVEL — sem riscos logísticos")
+    if len(armazenagem) > 0:
+        st.info(f"🏬 ARMAZENAGEM: {len(armazenagem)} SKUs precisam RE")
 
-st.markdown("---")
-st.markdown("## 🎯 Painel Executivo Operacional")
+    if len(ruptura)==0 and len(derrubada)==0 and len(armazenagem)==0:
+        st.success("🟢 OPERAÇÃO ESTÁVEL — sem riscos logísticos")
 
-k1,k2,k3,k4 = st.columns(4)
+    st.markdown("---")
+    st.markdown("## 🎯 Painel Executivo Operacional")
 
-k1.metric(
-    "🟢 Picking OK",
-    int((final["Status"]=="🟢 Picking").sum())
-)
+    k1,k2,k3,k4 = st.columns(4)
 
-k2.metric(
-    "🟠 Derrubada",
-    int((final["Status"]=="🟠 Derrubada").sum())
-)
+    k1.metric(
+        "🟢 Picking OK",
+        int((final["Status"]=="🟢 Picking").sum())
+    )
 
-k3.metric(
-    "🔵 Armazenagem",
-    int((final["Status"]=="🔵 Armazenagem").sum())
-)
+    k2.metric(
+        "🟠 Derrubada",
+        int((final["Status"]=="🟠 Derrubada").sum())
+    )
 
-k4.metric(
-    "🔴 Ruptura",
-    int((final["Status"]=="🔴 Possível Ruptura").sum())
-)
+    k3.metric(
+        "🔵 Armazenagem",
+        int((final["Status"]=="🔵 Armazenagem").sum())
+    )
 
-# =========================================
-# GRÁFICO STATUS
-# =========================================
+    k4.metric(
+        "🔴 Ruptura",
+        int((final["Status"]=="🔴 Possível Ruptura").sum())
+    )
 
-status_count = final["Status"].value_counts().reset_index()
-status_count.columns = ["Status","Qtd"]
+    status_count = final["Status"].value_counts().reset_index()
+    status_count.columns = ["Status","Qtd"]
 
-fig = px.pie(status_count, names="Status", values="Qtd", title="Distribuição logística")
-st.plotly_chart(fig, width="stretch")
+    fig = px.pie(status_count, names="Status", values="Qtd", title="Distribuição logística")
+    st.plotly_chart(fig, width="stretch")
 
 # =========================================
 # 📊 VISÃO MACRO PEÇAS POR CATEGORIA
 # =========================================
 
-st.markdown("---")
-st.markdown("## 📊 Visão Macro de Peças por Categoria")
+    st.markdown("---")
+    st.markdown("## 📊 Visão Macro de Peças por Categoria")
 
-# soma peças por status
-macro = final.groupby("Status")["pedido"].sum().reset_index()
-macro.columns = ["Categoria","Peças em pedidos"]
+    # soma peças por status
+    macro = final.groupby("Status")["pedido"].sum().reset_index()
+    macro.columns = ["Categoria","Peças em pedidos"]
 
-# ordenar maior volume
-macro = macro.sort_values(by="Peças em pedidos", ascending=False)
+    # ordenar maior volume
+    macro = macro.sort_values(by="Peças em pedidos", ascending=False)
 
-# KPIs executivos
-c1, c2, c3, c4 = st.columns(4)
+    # KPIs executivos
+    c1, c2, c3, c4 = st.columns(4)
 
-def get_val(cat):
-    val = macro.loc[macro["Categoria"]==cat, "Peças em pedidos"]
-    return int(val.values[0]) if len(val)>0 else 0
+    def get_val(cat):
+        val = macro.loc[macro["Categoria"]==cat, "Peças em pedidos"]
+        return int(val.values[0]) if len(val)>0 else 0
 
-# gráfico barras
-import plotly.express as px
+    # gráfico barras
+    import plotly.express as px
 
-fig_macro = px.bar(
-    macro,
-    x="Categoria",
-    y="Peças em pedidos",
-    text_auto=True,
-    title="Volume de peças por categoria operacional"
-)
+    fig_macro = px.bar(
+        macro,
+        x="Categoria",
+        y="Peças em pedidos",
+        text_auto=True,
+        title="Volume de peças por categoria operacional"
+    )
 
-st.plotly_chart(fig_macro, width="stretch")
+    st.plotly_chart(fig_macro, width="stretch")
 
-# gráfico pizza executivo
-fig_pizza = px.pie(
-    macro,
-    names="Categoria",
-    values="Peças em pedidos",
-    title="Distribuição de carga operacional"
-)
+    # gráfico pizza executivo
+    fig_pizza = px.pie(
+        macro,
+        names="Categoria",
+        values="Peças em pedidos",
+        title="Distribuição de carga operacional"
+    )
 
-st.plotly_chart(fig_pizza, width="stretch")
+    st.plotly_chart(fig_pizza, width="stretch")
 
-st.markdown("---")
-st.markdown("## 🚨 SKUs Críticos da Operação")
+    st.markdown("---")
+    st.markdown("## 🚨 SKUs Críticos da Operação")
 
-criticos = final[
-    (final["Status"]=="🟠 Derrubada") |
-    (final["Status"]=="🔵 Armazenagem") |
-    (final["Status"]=="🔴 Possível Ruptura")
-]
+    criticos = final[
+        (final["Status"]=="🟠 Derrubada") |
+        (final["Status"]=="🔵 Armazenagem") |
+        (final["Status"]=="🔴 Possível Ruptura")
+    ]
 
-if len(criticos) > 0:
-    st.dataframe(criticos.sort_values("pedido", ascending=False), width="stretch")
-else:
-    st.success("Nenhum SKU crítico 🎯")
+    if len(criticos) > 0:
+        st.dataframe(criticos.sort_values("pedido", ascending=False), width="stretch")
+    else:
+        st.success("Nenhum SKU crítico 🎯")
 
 
 # =========================================
 # 🧠 DERRUBADA INTELIGENTE PROFISSIONAL
 # =========================================
 
-st.markdown("---")
-st.markdown("## 🧠 Derrubada Inteligente (maior saldo / menos endereços)")
+    st.markdown("---")
+    st.markdown("## 🧠 Derrubada Inteligente (maior saldo / menos endereços)")
 
-derrubada_df = final[final["Status"]=="🟠 Derrubada"]
+    derrubada_df = final[final["Status"]=="🟠 Derrubada"]
 
-if len(derrubada_df) == 0:
-    st.success("Nenhuma derrubada necessária")
+    if len(derrubada_df) == 0:
+        st.success("Nenhuma derrubada necessária")
 
-else:
+    else:
 
-    detalhes = estoque.copy()
-    detalhes["ref"] = detalhes["Produto"]
+        detalhes = estoque.copy()
+        detalhes["ref"] = detalhes["Produto"]
 
-    onda_final = []
+        onda_final = []
 
-    for _, row in derrubada_df.iterrows():
+        for _, row in derrubada_df.iterrows():
 
-        ref = row["ref"]
-        pedido = row["pedido"]
+            ref = row["ref"]
+            pedido = row["pedido"]
 
-        posicoes = detalhes[
-            (detalhes["ref"]==ref) &
-            (detalhes["Área"]=="PP")
-        ].copy()
+            posicoes = detalhes[
+                (detalhes["ref"]==ref) &
+                (detalhes["Área"]=="PP")
+            ].copy()
 
-        if len(posicoes) == 0:
-            continue
+            if len(posicoes) == 0:
+                continue
 
-        # 🔵 MAIOR SALDO PRIMEIRO (menos endereços)
-        posicoes = posicoes.sort_values(
-            by="QTD Disponível",
-            ascending=False
-        )
+            # 🔵 MAIOR SALDO PRIMEIRO (menos endereços)
+            posicoes = posicoes.sort_values(
+                by="QTD Disponível",
+                ascending=False
+            )
 
-        soma = 0
-        usados = 0
+            soma = 0
+            usados = 0
 
-        for _, p in posicoes.iterrows():
+            for _, p in posicoes.iterrows():
 
-            qtd = p["QTD Disponível"]
-            soma += qtd
-            usados += 1
+                qtd = p["QTD Disponível"]
+                soma += qtd
+                usados += 1
 
-            onda_final.append({
-                "Ref": ref,
-                "Endereço": p["Endereço"],
-                "UZ/Pallet": p["UZ/Pallet"],
-                "Área": p["Área"],
-                "Qtd endereço": qtd,
-                "Pedido": pedido,
-                "Acumulado": soma
-            })
+                onda_final.append({
+                    "Ref": ref,
+                    "Endereço": p["Endereço"],
+                    "UZ/Pallet": p["UZ/Pallet"],
+                    "Área": p["Área"],
+                    "Qtd endereço": qtd,
+                    "Pedido": pedido,
+                    "Acumulado": soma
+                })
 
-            # 🔴 parou ao atingir pedido
-            if soma >= pedido:
-                break
+                # 🔴 parou ao atingir pedido
+                if soma >= pedido:
+                    break
 
-    onda_df = pd.DataFrame(onda_final)
+        onda_df = pd.DataFrame(onda_final)
 
-    st.warning(f"⚠️ {len(onda_df)} endereços necessários para atender pedidos")
-    st.dataframe(onda_df, width="stretch")
+        st.warning(f"⚠️ {len(onda_df)} endereços necessários para atender pedidos")
+        st.dataframe(onda_df, width="stretch")
 
     # =====================================
     # EXCEL OPERACIONAL
     # =====================================
 
-    import io
-    output = io.BytesIO()
+        import io
+        output = io.BytesIO()
 
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        onda_df.to_excel(writer, index=False, sheet_name="Derrubada")
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            onda_df.to_excel(writer, index=False, sheet_name="Derrubada")
 
-    excel_data = output.getvalue()
+        excel_data = output.getvalue()
 
-    st.download_button(
-        label="📥 BAIXAR DERRUBADA OTIMIZADA CD",
-        data=excel_data,
-        file_name="derrubada_otimizada_cd.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        st.download_button(
+            label="📥 BAIXAR DERRUBADA OTIMIZADA CD",
+            data=excel_data,
+            file_name="derrubada_otimizada_cd.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
