@@ -14,7 +14,7 @@ menu = st.sidebar.radio(
     [
         "🐊 Lacoste",
         "🍲 Le Creuset",
-        "𝒜𝔭𝔭𝓇𝑜𝔳𝔢",
+        "𝒜𝔭𝔭𝔯𝑜𝔳𝔢",
     ]
 )
 
