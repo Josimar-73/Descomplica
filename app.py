@@ -47,51 +47,20 @@ with st.spinner("Puxando dados do Metabase..."):
 st.success("Dados carregados!")
 
 # =========================================
-# 🎛️ FILTRO OFICIAL DO RELATÓRIO
-# =========================================
-
-st.sidebar.markdown("## 🎛️ Filtro do Relatório")
-
-# garante texto
-estoque["Estoque"] = estoque["Estoque"].astype(str)
-
-tipos = sorted(estoque["Estoque"].dropna().unique())
-
-tipo_sel = st.sidebar.selectbox(
-    "Tipo de estoque",
-    ["Todos"] + tipos
-)
-
-if tipo_sel != "Todos":
-    estoque = estoque[estoque["Estoque"] == tipo_sel]
-
-st.sidebar.success("Filtro aplicado")
-
-# =====================================
-# FILTRO TIPO ESTOQUE
-# =====================================
-
-if "Tipo de Estoque" in estoque.columns:
-    tipos = sorted(estoque["Tipo de Estoque"].dropna().unique())
-    tipo_sel = st.sidebar.multiselect(
-        "Tipo de Estoque",
-        tipos
-    )
-    if tipo_sel:
-        estoque = estoque[estoque["Tipo de Estoque"].isin(tipo_sel)]
-
-# =========================================
 # LIMPEZA
 # =========================================
+
 estoque["QTD Disponível"] = pd.to_numeric(estoque["QTD Disponível"], errors="coerce").fillna(0)
 pedidos["Soma de Qtd Atual"] = pd.to_numeric(pedidos["Soma de Qtd Atual"], errors="coerce").fillna(0)
 
+estoque["UZ/Pallet"] = estoque["UZ/Pallet"]
 estoque["ref"] = estoque["Produto"].astype(str)
 pedidos["ref"] = pedidos["Referencia"].astype(str)
 
 # =========================================
 # ESTOQUE POR AREA
 # =========================================
+
 est = estoque.groupby(["ref","Área"])["QTD Disponível"].sum().reset_index()
 
 pivot = est.pivot_table(
@@ -108,17 +77,20 @@ for col in ["M0","MR","PP"]:
 # =========================================
 # PEDIDOS
 # =========================================
+
 ped = pedidos.groupby("ref")["Soma de Qtd Atual"].sum().reset_index()
 ped.columns = ["ref","pedido"]
 
 # =========================================
 # JOIN
 # =========================================
+
 final = pivot.merge(ped, on="ref", how="left").fillna(0)
 
 # =========================================
 # CLASSIFICAÇÃO LOGÍSTICA
 # =========================================
+
 def classificar(row):
 
     m0 = row.get("M0",0)
@@ -268,6 +240,7 @@ if len(criticos) > 0:
 else:
     st.success("Nenhum SKU crítico 🎯")
 
+
 # =========================================
 # 🧠 DERRUBADA INTELIGENTE PROFISSIONAL
 # =========================================
@@ -318,6 +291,7 @@ else:
             onda_final.append({
                 "Ref": ref,
                 "Endereço": p["Endereço"],
+                "UZ/Pallet": p["UZ/Pallet"],
                 "Área": p["Área"],
                 "Qtd endereço": qtd,
                 "Pedido": pedido,
