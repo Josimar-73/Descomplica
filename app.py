@@ -13,6 +13,7 @@ menu = st.sidebar.radio(
     "Navegação",
     [
         "🐊 Lacoste",
+        "🐊 Estoque 900118"
         "🍲 Le Creuset",
         "𝒜𝔭𝔭𝔯𝑜𝔳𝔢",
     ]
