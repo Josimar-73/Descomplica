@@ -167,6 +167,16 @@ k4.metric(
 )
 
 # =========================================
+# GRÁFICO STATUS
+# =========================================
+
+status_count = final["Status"].value_counts().reset_index()
+status_count.columns = ["Status","Qtd"]
+
+fig = px.pie(status_count, names="Status", values="Qtd", title="Distribuição logística")
+st.plotly_chart(fig, width="stretch")
+
+# =========================================
 # 📊 VISÃO MACRO PEÇAS POR CATEGORIA
 # =========================================
 
@@ -223,16 +233,6 @@ if len(criticos) > 0:
     st.dataframe(criticos.sort_values("pedido", ascending=False), width="stretch")
 else:
     st.success("Nenhum SKU crítico 🎯")
-
-# =========================================
-# GRÁFICO STATUS
-# =========================================
-
-status_count = final["Status"].value_counts().reset_index()
-status_count.columns = ["Status","Qtd"]
-
-fig = px.pie(status_count, names="Status", values="Qtd", title="Distribuição logística")
-st.plotly_chart(fig, width="stretch")
 
 # =========================================
 # 🧠 DERRUBADA INTELIGENTE PROFISSIONAL
