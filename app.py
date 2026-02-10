@@ -5,7 +5,7 @@ import plotly.express as px
 from config import *
 
 st.set_page_config(layout="wide")
-st.title("🤖 Descomplica")
+st.title("𖠿 Descomplica")
 
 st.sidebar.title("☰ MENU")
 
@@ -13,9 +13,8 @@ menu = st.sidebar.radio(
     "Navegação",
     [
         "🐊 Lacoste",
-        "📊 Painel Executivo",
-        "📦 SKUs Críticos",
-        "🧠 Derrubada Inteligente"
+        "🍲 Le Creuset",
+        "𝒜 Approve",
     ]
 )
 
