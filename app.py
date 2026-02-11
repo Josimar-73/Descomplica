@@ -1226,7 +1226,7 @@ if menu == "𝒜𝔭𝔭𝔯𝑜𝔳𝔢":
 
             posicoes = detalhes[
                 (detalhes["ref"]==ref) &
-                (detalhes["Área"]=="RE")
+                (detalhes["Área"]=="PP")
             ].copy()
 
             if len(posicoes) == 0:
@@ -1284,4 +1284,5 @@ if menu == "𝒜𝔭𝔭𝔯𝑜𝔳𝔢":
             file_name="derrubada_otimizada_cd.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
 
