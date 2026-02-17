@@ -114,20 +114,6 @@ def processar_operacao(pergunta_estoque, pergunta_pedidos):
     # =====================================================
     # 🚨 TORRE DE CONTROLE
     # =====================================================
-    st.markdown("## 🚨 Torre de Controle Operacional")
-
-    ruptura = final[final["Status"] == "🔴 Possível Ruptura"]
-    derrubada = final[final["Status"] == "🟠 Derrubada"]
-    armazenagem = final[final["Status"] == "🔵 Armazenagem"]
-
-    if len(ruptura) > 0:
-        st.error(f"🚨 RUPTURA: {len(ruptura)} SKUs não atendem pedido")
-    if len(derrubada) > 0:
-        st.warning(f"⚠️ DERRUBADA NECESSÁRIA: {len(derrubada)} SKUs")
-    if len(armazenagem) > 0:
-        st.info(f"🏬 ARMAZENAGEM: {len(armazenagem)} SKUs precisam RE")
-    if len(ruptura) == 0 and len(derrubada) == 0 and len(armazenagem) == 0:
-        st.success("🟢 OPERAÇÃO ESTÁVEL — sem riscos logísticos")
 
     st.markdown("---")
     st.markdown("## 📊 Visão Macro por SKU")
@@ -414,4 +400,5 @@ if menu == "🍲 Le Creuset":
 
 if menu == "𝒜𝔭𝔭𝔯𝑜𝔳𝔢":
     processar_operacao(PERGUNTA_ESTOQUE_APRV, PERGUNTA_PEDIDOS_APRV)
+
 
