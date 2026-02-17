@@ -130,7 +130,7 @@ def processar_operacao(pergunta_estoque, pergunta_pedidos):
         st.success("🟢 OPERAÇÃO ESTÁVEL — sem riscos logísticos")
 
     st.markdown("---")
-    st.markdown("## 🎯 Painel Executivo Operacional")
+    st.markdown("## 📊 Visão Macro por SKU")
 
     k1, k2, k3, k4 = st.columns(4)
 
@@ -147,7 +147,7 @@ def processar_operacao(pergunta_estoque, pergunta_pedidos):
 
     # ================= MACRO
     st.markdown("---")
-    st.markdown("## 📊 Visão Macro de Peças por Categoria")
+    st.markdown("## 📊 Visão Macro por Peças")
 
     macro = final.groupby("Status")["pedido"].sum().reset_index()
     macro.columns = ["Categoria", "Peças em pedidos"]
@@ -414,3 +414,4 @@ if menu == "🍲 Le Creuset":
 
 if menu == "𝒜𝔭𝔭𝔯𝑜𝔳𝔢":
     processar_operacao(PERGUNTA_ESTOQUE_APRV, PERGUNTA_PEDIDOS_APRV)
+
