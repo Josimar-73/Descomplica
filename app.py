@@ -19,63 +19,76 @@ menu = st.sidebar.radio(
     ]
 )
 
-if menu == "🐊 Lacoste":
+# =====================================================
+# 🔌 METABASE CACHE
+# =====================================================
 
-    # =========================================
-    # FUNÇÃO CONSULTA METABASE
-    # =========================================
-    def puxar_pergunta(pergunta_id):
+@st.cache_data(ttl=300)
+def puxar_pergunta(pergunta_id):
+    url = f"{METABASE_URL}/api/card/{pergunta_id}/query/json"
+    headers = {"X-Metabase-Session": SESSION_TOKEN}
+    response = requests.post(url, headers=headers)
 
-        url = f"{METABASE_URL}/api/card/{pergunta_id}/query/json"
+    if response.status_code != 200:
+        st.error(f"❌ Erro ao consultar pergunta {pergunta_id}")
+        st.stop()
 
-        headers = {
-            "X-Metabase-Session": SESSION_TOKEN
-        }
+    return pd.DataFrame(response.json())
 
-        response = requests.post(url, headers=headers)
+# =====================================================
+# 🧠 CLASSIFICAÇÃO
+# =====================================================
 
-        if response.status_code != 200:
-            st.error(f"❌ Erro ao consultar pergunta {pergunta_id}")
-            st.stop()
+def classificar(row):
+    m0 = row.get("M0", 0)
+    mr = row.get("MR", 0)
+    pp = row.get("PP", 0)
+    re = row.get("RE", 0)
+    pedido = row["pedido"]
 
-        data = response.json()
-        return pd.DataFrame(data)
+    picking = m0 + mr
+    com_pp = picking + pp
+    com_re = com_pp + re
 
-    # =========================================
-    # BOTÃO
-    # =========================================
+    if pedido == 0:
+        return "Sem Pedido"
+    if picking >= pedido:
+        return "🟢 Picking"
+    elif com_pp >= pedido:
+        return "🟠 Derrubada"
+    elif com_re >= pedido:
+        return "🔵 Armazenagem"
+    else:
+        return "🔴 Possível Ruptura"
+
+# =====================================================
+# 🚀 MOTOR PRINCIPAL
+# =====================================================
+
+def processar_operacao(pergunta_estoque, pergunta_pedidos):
+
     if st.button("🔄 Atualizar dados"):
-        st.session_state["dados"] = True
+        st.session_state[f"dados_{menu}"] = True
 
-    if "dados" not in st.session_state:
+    if f"dados_{menu}" not in st.session_state:
         st.info("Clique em atualizar dados")
         st.stop()
 
-    # =========================================
-    # PUXAR DADOS
-    # =========================================
     with st.spinner("Puxando dados do Metabase..."):
-        estoque = puxar_pergunta(PERGUNTA_ESTOQUE_LA)
-        pedidos = puxar_pergunta(PERGUNTA_PEDIDOS_LA)
+        estoque = puxar_pergunta(pergunta_estoque)
+        pedidos = puxar_pergunta(pergunta_pedidos)
 
     st.success("Dados carregados!")
 
-    # =========================================
-    # LIMPEZA
-    # =========================================
-
+    # ================= LIMPEZA
     estoque["QTD Disponível"] = pd.to_numeric(estoque["QTD Disponível"], errors="coerce").fillna(0)
     pedidos["Soma de Qtd Atual"] = pd.to_numeric(pedidos["Soma de Qtd Atual"], errors="coerce").fillna(0)
 
-    estoque["UZ/Pallet"] = estoque["UZ/Pallet"]
     estoque["ref"] = estoque["Produto"].astype(str)
     pedidos["ref"] = pedidos["Referencia"].astype(str)
 
-    # =========================================
-    # ESTOQUE POR AREA
-    # =========================================
-
-    est = estoque.groupby(["ref","Área"])["QTD Disponível"].sum().reset_index()
+    # ================= ESTOQUE POR AREA
+    est = estoque.groupby(["ref", "Área"])["QTD Disponível"].sum().reset_index()
 
     pivot = est.pivot_table(
         index="ref",
@@ -84,137 +97,61 @@ if menu == "🐊 Lacoste":
         fill_value=0
     ).reset_index()
 
-    for col in ["M0","MR","PP"]:
+    for col in ["M0", "MR", "PP", "RE"]:
         if col not in pivot.columns:
             pivot[col] = 0
 
-    # =========================================
-    # PEDIDOS
-    # =========================================
-
+    # ================= PEDIDOS
     ped = pedidos.groupby("ref")["Soma de Qtd Atual"].sum().reset_index()
-    ped.columns = ["ref","pedido"]
-
-    # =========================================
-    # JOIN
-    # =========================================
+    ped.columns = ["ref", "pedido"]
 
     final = pivot.merge(ped, on="ref", how="left").fillna(0)
 
-    # =========================================
-    # CLASSIFICAÇÃO LOGÍSTICA
-    # =========================================
-
-    def classificar(row):
-
-        m0 = row.get("M0",0)
-        mr = row.get("MR",0)
-        pp = row.get("PP",0)
-        re = row.get("RE",0)
-        pedido = row["pedido"]
-
-        picking = m0 + mr
-        com_pp = picking + pp
-        com_re = com_pp + re
-
-        if pedido == 0:
-            return "Sem Pedido"
-
-        # atende só com picking
-        if picking >= pedido:
-            return "🟢 Picking"
-
-        # precisa derrubar PP
-        elif com_pp >= pedido:
-            return "🟠 Derrubada"
-
-        # precisa armazenagem RE
-        elif com_re >= pedido:
-            return "🔵 Armazenagem"
-
-        # nem assim atende
-        else:
-            return "🔴 Possível Ruptura"
-
+    # ================= CLASSIFICAR
     final["Status"] = final.apply(classificar, axis=1)
     final["Saldo_pos"] = (final["M0"] + final["MR"] + final["PP"]) - final["pedido"]
 
-    # =========================================
-    # 🚨 TORRE DE CONTROLE LOGÍSTICA
-    # =========================================
-
+    # =====================================================
+    # 🚨 TORRE DE CONTROLE
+    # =====================================================
     st.markdown("## 🚨 Torre de Controle Operacional")
 
-    ruptura = final[final["Status"]=="🔴 Possível Ruptura"]
-    derrubada = final[final["Status"]=="🟠 Derrubada"]
-    armazenagem = final[final["Status"]=="🔵 Armazenagem"]
+    ruptura = final[final["Status"] == "🔴 Possível Ruptura"]
+    derrubada = final[final["Status"] == "🟠 Derrubada"]
+    armazenagem = final[final["Status"] == "🔵 Armazenagem"]
 
     if len(ruptura) > 0:
         st.error(f"🚨 RUPTURA: {len(ruptura)} SKUs não atendem pedido")
-
     if len(derrubada) > 0:
         st.warning(f"⚠️ DERRUBADA NECESSÁRIA: {len(derrubada)} SKUs")
-
     if len(armazenagem) > 0:
         st.info(f"🏬 ARMAZENAGEM: {len(armazenagem)} SKUs precisam RE")
-
-    if len(ruptura)==0 and len(derrubada)==0 and len(armazenagem)==0:
+    if len(ruptura) == 0 and len(derrubada) == 0 and len(armazenagem) == 0:
         st.success("🟢 OPERAÇÃO ESTÁVEL — sem riscos logísticos")
 
     st.markdown("---")
     st.markdown("## 🎯 Painel Executivo Operacional")
 
-    k1,k2,k3,k4 = st.columns(4)
+    k1, k2, k3, k4 = st.columns(4)
 
-    k1.metric(
-        "🟢 Picking OK",
-        int((final["Status"]=="🟢 Picking").sum())
-    )
-
-    k2.metric(
-        "🟠 Derrubada",
-        int((final["Status"]=="🟠 Derrubada").sum())
-    )
-
-    k3.metric(
-        "🔵 Armazenagem",
-        int((final["Status"]=="🔵 Armazenagem").sum())
-    )
-
-    k4.metric(
-        "🔴 Ruptura",
-        int((final["Status"]=="🔴 Possível Ruptura").sum())
-    )
+    k1.metric("🟢 Picking OK", int((final["Status"] == "🟢 Picking").sum()))
+    k2.metric("🟠 Derrubada", int((final["Status"] == "🟠 Derrubada").sum()))
+    k3.metric("🔵 Armazenagem", int((final["Status"] == "🔵 Armazenagem").sum()))
+    k4.metric("🔴 Ruptura", int((final["Status"] == "🔴 Possível Ruptura").sum()))
 
     status_count = final["Status"].value_counts().reset_index()
-    status_count.columns = ["Status","Qtd"]
+    status_count.columns = ["Status", "Qtd"]
 
     fig = px.pie(status_count, names="Status", values="Qtd", title="Distribuição logística")
     st.plotly_chart(fig, width="stretch")
 
-    # =========================================
-    # 📊 VISÃO MACRO PEÇAS POR CATEGORIA
-    # =========================================
-
+    # ================= MACRO
     st.markdown("---")
     st.markdown("## 📊 Visão Macro de Peças por Categoria")
 
-    # soma peças por status
     macro = final.groupby("Status")["pedido"].sum().reset_index()
-    macro.columns = ["Categoria","Peças em pedidos"]
-
-    # ordenar maior volume
+    macro.columns = ["Categoria", "Peças em pedidos"]
     macro = macro.sort_values(by="Peças em pedidos", ascending=False)
-
-    # KPIs executivos
-    c1, c2, c3, c4 = st.columns(4)
-
-    def get_val(cat):
-        val = macro.loc[macro["Categoria"]==cat, "Peças em pedidos"]
-        return int(val.values[0]) if len(val)>0 else 0
-
-    # gráfico barras
-    import plotly.express as px
 
     fig_macro = px.bar(
         macro,
@@ -223,26 +160,24 @@ if menu == "🐊 Lacoste":
         text_auto=True,
         title="Volume de peças por categoria operacional"
     )
-
     st.plotly_chart(fig_macro, width="stretch")
 
-    # gráfico pizza executivo
     fig_pizza = px.pie(
         macro,
         names="Categoria",
         values="Peças em pedidos",
         title="Distribuição de carga operacional"
     )
-
     st.plotly_chart(fig_pizza, width="stretch")
 
+    # ================= CRÍTICOS
     st.markdown("---")
     st.markdown("## 🚨 SKUs Críticos da Operação")
 
     criticos = final[
-        (final["Status"]=="🟠 Derrubada") |
-        (final["Status"]=="🔵 Armazenagem") |
-        (final["Status"]=="🔴 Possível Ruptura")
+        (final["Status"] == "🟠 Derrubada") |
+        (final["Status"] == "🔵 Armazenagem") |
+        (final["Status"] == "🔴 Possível Ruptura")
     ]
 
     if len(criticos) > 0:
@@ -250,1039 +185,232 @@ if menu == "🐊 Lacoste":
     else:
         st.success("Nenhum SKU crítico 🎯")
 
-
-    # =========================================
-    # 🧠 DERRUBADA INTELIGENTE PROFISSIONAL
-    # =========================================
-
+    # =====================================================
+    # 🧠 DERRUBADA INTELIGENTE
+    # =====================================================
     st.markdown("---")
-    st.markdown("## 🧠 Derrubada Inteligente (maior saldo / menos endereços)")
+    st.markdown("## 🧠 Derrubada Compactada")
 
-    derrubada_df = final[final["Status"]=="🟠 Derrubada"]
+    derrubada_df = final[final["Status"] == "🟠 Derrubada"]
 
     if len(derrubada_df) == 0:
         st.success("Nenhuma derrubada necessária")
 
     else:
-
         detalhes = estoque.copy()
         detalhes["ref"] = detalhes["Produto"]
 
-        onda_final = []
+    onda_final = []
 
-        for _, row in derrubada_df.iterrows():
+    for _, row in derrubada_df.iterrows():
+        ref = row["ref"]
+        pedido = row["pedido"]
 
-            ref = row["ref"]
-            pedido = row["pedido"]
+        posicoes = detalhes[
+            (detalhes["ref"] == ref) &
+            (detalhes["Área"] == "PP")
+        ].copy()
 
-            posicoes = detalhes[
-                (detalhes["ref"]==ref) &
-                (detalhes["Área"]=="PP")
-            ].copy()
+        if len(posicoes) == 0:
+            continue
 
-            if len(posicoes) == 0:
-                continue
+        posicoes = posicoes.sort_values(by="QTD Disponível", ascending=False)
 
-            # 🔵 MAIOR SALDO PRIMEIRO (menos endereços)
-            posicoes = posicoes.sort_values(
-                by="QTD Disponível",
-                ascending=False
-            )
+        soma = 0
 
-            soma = 0
-            usados = 0
+        for _, p in posicoes.iterrows():
+            qtd = p["QTD Disponível"]
+            soma += qtd
 
-            for _, p in posicoes.iterrows():
+            onda_final.append({
+                "Ref": ref,
+                "Endereço": p["Endereço"],
+                "UZ/Pallet": p["UZ/Pallet"],
+                "Área": p["Área"],
+                "Qtd endereço": qtd,
+                "Pedido": pedido,
+                "Acumulado": soma
+            })
 
-                qtd = p["QTD Disponível"]
-                soma += qtd
-                usados += 1
+            if soma >= pedido:
+                break
 
-                onda_final.append({
-                    "Ref": ref,
-                    "Endereço": p["Endereço"],
-                    "UZ/Pallet": p["UZ/Pallet"],
-                    "Área": p["Área"],
-                    "Qtd endereço": qtd,
-                    "Pedido": pedido,
-                    "Acumulado": soma
-                })
+    onda_df = pd.DataFrame(onda_final)
 
-                # 🔴 parou ao atingir pedido
-                if soma >= pedido:
-                    break
+    st.warning(f"⚠️ {len(onda_df)} endereços necessários para atender pedidos")
+    st.dataframe(onda_df, width="stretch")
 
-        onda_df = pd.DataFrame(onda_final)
+    import io
+    output = io.BytesIO()
 
-        st.warning(f"⚠️ {len(onda_df)} endereços necessários para atender pedidos")
-        st.dataframe(onda_df, width="stretch")
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        onda_df.to_excel(writer, index=False, sheet_name="Derrubada")
 
-    # =====================================
-    # EXCEL OPERACIONAL
-    # =====================================
+    st.download_button(
+        label="📥 BAIXAR DERRUBADA OTIMIZADA CD",
+        data=output.getvalue(),
+        file_name="derrubada_otimizada_cd.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
+    # =====================================================
+    # 🚨 PEDIDOS SEM POSIÇÃO NO ESTOQUE
+    # =====================================================
+    st.markdown("---")
+    st.markdown("## 🚨 Referências sem posição em estoque")
+
+    # refs existentes no estoque
+    refs_estoque = set(pivot["ref"].astype(str))
+
+    pedidos_base = pedidos.copy()
+    pedidos_base["ref"] = pedidos_base["Referencia"].astype(str)
+    pedidos_base["qtd"] = pd.to_numeric(
+        pedidos_base["Soma de Qtd Atual"], errors="coerce"
+    ).fillna(0)
+
+    # pegar numero pedido = 2ª coluna metabase
+    colunas_ped = list(pedidos_base.columns)
+    col_num_pedido = colunas_ped[1] if len(colunas_ped) >= 2 else None
+
+    # filtrar sem estoque
+    sem_estoque = pedidos_base[
+        ~pedidos_base["ref"].isin(refs_estoque)
+    ].copy()
+
+    if len(sem_estoque) == 0:
+        st.success("Nenhuma referência sem posição de estoque 🎯")
+    else:
+
+        if col_num_pedido:
+            rel_sem = sem_estoque[[col_num_pedido, "ref", "qtd"]].copy()
+            rel_sem.columns = ["Pedido", "Referência", "Qtd Solicitada"]
+        else:
+            rel_sem = sem_estoque[["ref", "qtd"]].copy()
+            rel_sem.columns = ["Referência", "Qtd Solicitada"]
+            rel_sem.insert(0, "Pedido", "-")
+
+        rel_sem = rel_sem.sort_values("Qtd Solicitada", ascending=False)
+
+        st.error(f"🚨 {len(rel_sem)} referências sem posição no estoque")
+        st.dataframe(rel_sem, width="stretch", height=400)
+
+        # excel
         import io
-        output = io.BytesIO()
+        output_zero = io.BytesIO()
 
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            onda_df.to_excel(writer, index=False, sheet_name="Derrubada")
-
-        excel_data = output.getvalue()
+        with pd.ExcelWriter(output_zero, engine="openpyxl") as writer:
+            rel_sem.to_excel(writer, index=False, sheet_name="Sem estoque")
 
         st.download_button(
-            label="📥 BAIXAR DERRUBADA OTIMIZADA CD",
-            data=excel_data,
-            file_name="derrubada_otimizada_cd.xlsx",
+            label="📥 BAIXAR CORTES",
+            data=output_zero.getvalue(),
+            file_name="pedidos_sem_estoque.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
+    # =====================================================
+    # 🚨 RELATÓRIO COMPLETO DE RUPTURA
+    # =====================================================
+    st.markdown("---")
+    st.markdown("## 🚨 Visão Analítica de Ruptura")
+
+    # filtrar apenas rupturas
+    ruptura_view = final[final["Status"] == "🔴 Possível Ruptura"].copy()
+
+    if len(ruptura_view) == 0:
+        st.success("Nenhuma ruptura encontrada 🎯")
+        return
+
+    # =====================================================
+    # 🔢 CAPTURAR NUMERO DO PEDIDO (2ª COLUNA METABASE)
+    # =====================================================
+    colunas_ped = list(pedidos.columns)
+
+    if len(colunas_ped) >= 2:
+        col_num_pedido = colunas_ped[1]  # segunda coluna = numero pedido
+
+        ped_num = pedidos.copy()
+        ped_num["ref"] = ped_num["Referencia"].astype(str)
+
+        ped_num = ped_num[["ref", col_num_pedido]].drop_duplicates()
+        ped_num.columns = ["ref", "Numero Pedido"]
+
+        ruptura_view = ruptura_view.merge(ped_num, on="ref", how="left")
+    else:
+        ruptura_view["Numero Pedido"] = "-"
+
+    # =====================================================
+    # GARANTIR COLUNAS DE ESTOQUE
+    # =====================================================
+    for col in ["M0", "MR", "PP", "RE"]:
+        if col not in ruptura_view.columns:
+            ruptura_view[col] = 0
+
+    # =====================================================
+    # ORGANIZAÇÃO FINAL
+    # =====================================================
+    ruptura_view = ruptura_view[[
+        "Numero Pedido",
+        "ref",
+        "pedido",
+        "M0",
+        "MR",
+        "PP",
+        "RE"
+    ]]
+
+    ruptura_view.columns = [
+        "Pedido",
+        "Referência",
+        "Qtd Pedido",
+        "Qtd M0",
+        "Qtd MR",
+        "Qtd PP",
+        "Qtd RE"
+    ]
+
+    # ordenar por maior impacto
+    ruptura_view = ruptura_view.sort_values("Qtd Pedido", ascending=False)
+
+    # =====================================================
+    # EXIBIÇÃO
+    # =====================================================
+    st.error(f"🚨 {len(ruptura_view)} SKUs em ruptura operacional")
+
+    st.dataframe(
+        ruptura_view,
+        width="stretch",
+        height=500
+    )
+
+    # =====================================================
+    # EXPORTAÇÃO EXCEL
+    # =====================================================
+    import io
+    output_rup = io.BytesIO()
+
+    with pd.ExcelWriter(output_rup, engine="openpyxl") as writer:
+        ruptura_view.to_excel(writer, index=False, sheet_name="Ruptura")
+
+    st.download_button(
+        label="📥 BAIXAR RELATÓRIO DE RUPTURA",
+        data=output_rup.getvalue(),
+        file_name="relatorio_ruptura_cd.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+# =====================================================
+# CHAMADAS POR MENU
+# =====================================================
+
+if menu == "🐊 Lacoste":
+    processar_operacao(PERGUNTA_ESTOQUE_LA, PERGUNTA_PEDIDOS_LA)
 
 if menu == "🐊 Estoque 900118":
-    # =========================================
-    # FUNÇÃO CONSULTA METABASE
-    # =========================================
-    def puxar_pergunta(pergunta_id):
-
-        url = f"{METABASE_URL}/api/card/{pergunta_id}/query/json"
-
-        headers = {
-            "X-Metabase-Session": SESSION_TOKEN
-        }
-
-        response = requests.post(url, headers=headers)
-
-        if response.status_code != 200:
-            st.error(f"❌ Erro ao consultar pergunta {pergunta_id}")
-            st.stop()
-
-        data = response.json()
-        return pd.DataFrame(data)
-
-    # =========================================
-    # BOTÃO
-    # =========================================
-    if st.button("🔄 Atualizar dados"):
-        st.session_state["dados"] = True
-
-    if "dados" not in st.session_state:
-        st.info("Clique em atualizar dados")
-        st.stop()
-
-    # =========================================
-    # PUXAR DADOS
-    # =========================================
-    with st.spinner("Puxando dados do Metabase..."):
-        estoque = puxar_pergunta(PERGUNTA_ESTOQUE_18)
-        pedidos = puxar_pergunta(PERGUNTA_PEDIDOS_18)
-
-    st.success("Dados carregados!")
-
-    # =========================================
-    # LIMPEZA
-    # =========================================
-
-    estoque["QTD Disponível"] = pd.to_numeric(estoque["QTD Disponível"], errors="coerce").fillna(0)
-    pedidos["Soma de Qtd Atual"] = pd.to_numeric(pedidos["Soma de Qtd Atual"], errors="coerce").fillna(0)
-
-    estoque["UZ/Pallet"] = estoque["UZ/Pallet"]
-    estoque["ref"] = estoque["Produto"].astype(str)
-    pedidos["ref"] = pedidos["Referencia"].astype(str)
-
-    # =========================================
-    # ESTOQUE POR AREA
-    # =========================================
-
-    est = estoque.groupby(["ref","Área"])["QTD Disponível"].sum().reset_index()
-
-    pivot = est.pivot_table(
-        index="ref",
-        columns="Área",
-        values="QTD Disponível",
-        fill_value=0
-    ).reset_index()
-
-    for col in ["M0","MR","PP"]:
-        if col not in pivot.columns:
-            pivot[col] = 0
-
-    # =========================================
-    # PEDIDOS
-    # =========================================
-
-    ped = pedidos.groupby("ref")["Soma de Qtd Atual"].sum().reset_index()
-    ped.columns = ["ref","pedido"]
-
-    # =========================================
-    # JOIN
-    # =========================================
-
-    final = pivot.merge(ped, on="ref", how="left").fillna(0)
-
-    # =========================================
-    # CLASSIFICAÇÃO LOGÍSTICA
-    # =========================================
-
-    def classificar(row):
-
-        m0 = row.get("M0",0)
-        mr = row.get("MR",0)
-        pp = row.get("PP",0)
-        re = row.get("RE",0)
-        pedido = row["pedido"]
-
-        picking = m0 + mr
-        com_pp = picking + pp
-        com_re = com_pp + re
-
-        if pedido == 0:
-            return "Sem Pedido"
-
-        # atende só com picking
-        if picking >= pedido:
-            return "🟢 Picking"
-
-        # precisa derrubar PP
-        elif com_pp >= pedido:
-            return "🟠 Derrubada"
-
-        # precisa armazenagem RE
-        elif com_re >= pedido:
-            return "🔵 Armazenagem"
-
-        # nem assim atende
-        else:
-            return "🔴 Possível Ruptura"
-
-    final["Status"] = final.apply(classificar, axis=1)
-    final["Saldo_pos"] = (final["M0"] + final["MR"] + final["PP"]) - final["pedido"]
-
-    # =========================================
-    # 🚨 TORRE DE CONTROLE LOGÍSTICA
-    # =========================================
-
-    st.markdown("## 🚨 Torre de Controle Operacional")
-
-    ruptura = final[final["Status"]=="🔴 Possível Ruptura"]
-    derrubada = final[final["Status"]=="🟠 Derrubada"]
-    armazenagem = final[final["Status"]=="🔵 Armazenagem"]
-
-    if len(ruptura) > 0:
-        st.error(f"🚨 RUPTURA: {len(ruptura)} SKUs não atendem pedido")
-
-    if len(derrubada) > 0:
-        st.warning(f"⚠️ DERRUBADA NECESSÁRIA: {len(derrubada)} SKUs")
-
-    if len(armazenagem) > 0:
-        st.info(f"🏬 ARMAZENAGEM: {len(armazenagem)} SKUs precisam RE")
-
-    if len(ruptura)==0 and len(derrubada)==0 and len(armazenagem)==0:
-        st.success("🟢 OPERAÇÃO ESTÁVEL — sem riscos logísticos")
-
-    st.markdown("---")
-    st.markdown("## 🎯 Painel Executivo Operacional")
-
-    k1,k2,k3,k4 = st.columns(4)
-
-    k1.metric(
-        "🟢 Picking OK",
-        int((final["Status"]=="🟢 Picking").sum())
-    )
-
-    k2.metric(
-        "🟠 Derrubada",
-        int((final["Status"]=="🟠 Derrubada").sum())
-    )
-
-    k3.metric(
-        "🔵 Armazenagem",
-        int((final["Status"]=="🔵 Armazenagem").sum())
-    )
-
-    k4.metric(
-        "🔴 Ruptura",
-        int((final["Status"]=="🔴 Possível Ruptura").sum())
-    )
-
-    status_count = final["Status"].value_counts().reset_index()
-    status_count.columns = ["Status","Qtd"]
-
-    fig = px.pie(status_count, names="Status", values="Qtd", title="Distribuição logística")
-    st.plotly_chart(fig, width="stretch")
-
-# =========================================
-# 📊 VISÃO MACRO PEÇAS POR CATEGORIA
-# =========================================
-
-    st.markdown("---")
-    st.markdown("## 📊 Visão Macro de Peças por Categoria")
-
-    # soma peças por status
-    macro = final.groupby("Status")["pedido"].sum().reset_index()
-    macro.columns = ["Categoria","Peças em pedidos"]
-
-    # ordenar maior volume
-    macro = macro.sort_values(by="Peças em pedidos", ascending=False)
-
-    # KPIs executivos
-    c1, c2, c3, c4 = st.columns(4)
-
-    def get_val(cat):
-        val = macro.loc[macro["Categoria"]==cat, "Peças em pedidos"]
-        return int(val.values[0]) if len(val)>0 else 0
-
-    # gráfico barras
-    import plotly.express as px
-
-    fig_macro = px.bar(
-        macro,
-        x="Categoria",
-        y="Peças em pedidos",
-        text_auto=True,
-        title="Volume de peças por categoria operacional"
-    )
-
-    st.plotly_chart(fig_macro, width="stretch")
-
-    # gráfico pizza executivo
-    fig_pizza = px.pie(
-        macro,
-        names="Categoria",
-        values="Peças em pedidos",
-        title="Distribuição de carga operacional"
-    )
-
-    st.plotly_chart(fig_pizza, width="stretch")
-
-    st.markdown("---")
-    st.markdown("## 🚨 SKUs Críticos da Operação")
-
-    criticos = final[
-        (final["Status"]=="🟠 Derrubada") |
-        (final["Status"]=="🔵 Armazenagem") |
-        (final["Status"]=="🔴 Possível Ruptura")
-    ]
-
-    if len(criticos) > 0:
-        st.dataframe(criticos.sort_values("pedido", ascending=False), width="stretch")
-    else:
-        st.success("Nenhum SKU crítico 🎯")
-
-    
-# =========================================
-# 🧠 DERRUBADA INTELIGENTE PROFISSIONAL
-# =========================================
-
-    st.markdown("---")
-    st.markdown("## 🧠 Derrubada Inteligente (maior saldo / menos endereços)")
-
-    derrubada_df = final[final["Status"]=="🟠 Derrubada"]
-
-    if len(derrubada_df) == 0:
-        st.success("Nenhuma derrubada necessária")
-
-    else:
-
-        detalhes = estoque.copy()
-        detalhes["ref"] = detalhes["Produto"]
-
-        onda_final = []
-
-        for _, row in derrubada_df.iterrows():
-
-            ref = row["ref"]
-            pedido = row["pedido"]
-
-            posicoes = detalhes[
-                (detalhes["ref"]==ref) &
-                (detalhes["Área"]=="PP")
-            ].copy()
-
-            if len(posicoes) == 0:
-                continue
-
-            # 🔵 MAIOR SALDO PRIMEIRO (menos endereços)
-            posicoes = posicoes.sort_values(
-                by="QTD Disponível",
-                ascending=False
-            )
-
-            soma = 0
-            usados = 0
-
-            for _, p in posicoes.iterrows():
-
-                qtd = p["QTD Disponível"]
-                soma += qtd
-                usados += 1
-
-                onda_final.append({
-                    "Ref": ref,
-                    "Endereço": p["Endereço"],
-                    "UZ/Pallet": p["UZ/Pallet"],
-                    "Área": p["Área"],
-                    "Qtd endereço": qtd,
-                    "Pedido": pedido,
-                    "Acumulado": soma
-                })
-
-                # 🔴 parou ao atingir pedido
-                if soma >= pedido:
-                    break
-
-        onda_df = pd.DataFrame(onda_final)
-
-        st.warning(f"⚠️ {len(onda_df)} endereços necessários para atender pedidos")
-        st.dataframe(onda_df, width="stretch")
-
-    # =====================================
-    # EXCEL OPERACIONAL
-    # =====================================
-
-        import io
-        output = io.BytesIO()
-
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            onda_df.to_excel(writer, index=False, sheet_name="Derrubada")
-
-        excel_data = output.getvalue()
-
-        st.download_button(
-            label="📥 BAIXAR DERRUBADA OTIMIZADA CD",
-            data=excel_data,
-            file_name="derrubada_otimizada_cd.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    processar_operacao(PERGUNTA_ESTOQUE_18, PERGUNTA_PEDIDOS_18)
 
 if menu == "🍲 Le Creuset":
-    # =========================================
-    # FUNÇÃO CONSULTA METABASE
-    # =========================================
-    def puxar_pergunta(pergunta_id):
-
-        url = f"{METABASE_URL}/api/card/{pergunta_id}/query/json"
-
-        headers = {
-            "X-Metabase-Session": SESSION_TOKEN
-        }
-
-        response = requests.post(url, headers=headers)
-
-        if response.status_code != 200:
-            st.error(f"❌ Erro ao consultar pergunta {pergunta_id}")
-            st.stop()
-
-        data = response.json()
-        return pd.DataFrame(data)
-
-    # =========================================
-    # BOTÃO
-    # =========================================
-    if st.button("🔄 Atualizar dados"):
-        st.session_state["dados"] = True
-
-    if "dados" not in st.session_state:
-        st.info("Clique em atualizar dados")
-        st.stop()
-
-    # =========================================
-    # PUXAR DADOS
-    # =========================================
-    with st.spinner("Puxando dados do Metabase..."):
-        estoque = puxar_pergunta(PERGUNTA_ESTOQUE_LC)
-        pedidos = puxar_pergunta(PERGUNTA_PEDIDOS_LC)
-
-    st.success("Dados carregados!")
-
-    # =========================================
-    # LIMPEZA
-    # =========================================
-
-    estoque["QTD Disponível"] = pd.to_numeric(estoque["QTD Disponível"], errors="coerce").fillna(0)
-    pedidos["Soma de Qtd Atual"] = pd.to_numeric(pedidos["Soma de Qtd Atual"], errors="coerce").fillna(0)
-
-    estoque["UZ/Pallet"] = estoque["UZ/Pallet"]
-    estoque["ref"] = estoque["Produto"].astype(str)
-    pedidos["ref"] = pedidos["Referencia"].astype(str)
-
-    # =========================================
-    # ESTOQUE POR AREA
-    # =========================================
-
-    est = estoque.groupby(["ref","Área"])["QTD Disponível"].sum().reset_index()
-
-    pivot = est.pivot_table(
-        index="ref",
-        columns="Área",
-        values="QTD Disponível",
-        fill_value=0
-    ).reset_index()
-
-    for col in ["M0","MR","PP"]:
-        if col not in pivot.columns:
-            pivot[col] = 0
-
-    # =========================================
-    # PEDIDOS
-    # =========================================
-
-    ped = pedidos.groupby("ref")["Soma de Qtd Atual"].sum().reset_index()
-    ped.columns = ["ref","pedido"]
-
-    # =========================================
-    # JOIN
-    # =========================================
-
-    final = pivot.merge(ped, on="ref", how="left").fillna(0)
-
-    # =========================================
-    # CLASSIFICAÇÃO LOGÍSTICA
-    # =========================================
-
-    def classificar(row):
-
-        m0 = row.get("M0",0)
-        mr = row.get("MR",0)
-        pp = row.get("PP",0)
-        re = row.get("RE",0)
-        pedido = row["pedido"]
-
-        picking = m0 + mr
-        com_pp = picking + pp
-        com_re = com_pp + re
-
-        if pedido == 0:
-            return "Sem Pedido"
-
-        # atende só com picking
-        if picking >= pedido:
-            return "🟢 Picking"
-
-        # precisa derrubar PP
-        elif com_pp >= pedido:
-            return "🟠 Derrubada"
-
-        # precisa armazenagem RE
-        elif com_re >= pedido:
-            return "🔵 Armazenagem"
-
-        # nem assim atende
-        else:
-            return "🔴 Possível Ruptura"
-
-    final["Status"] = final.apply(classificar, axis=1)
-    final["Saldo_pos"] = (final["M0"] + final["MR"] + final["PP"]) - final["pedido"]
-
-    # =========================================
-    # 🚨 TORRE DE CONTROLE LOGÍSTICA
-    # =========================================
-
-    st.markdown("## 🚨 Torre de Controle Operacional")
-
-    ruptura = final[final["Status"]=="🔴 Possível Ruptura"]
-    derrubada = final[final["Status"]=="🟠 Derrubada"]
-    armazenagem = final[final["Status"]=="🔵 Armazenagem"]
-
-    if len(ruptura) > 0:
-        st.error(f"🚨 RUPTURA: {len(ruptura)} SKUs não atendem pedido")
-
-    if len(derrubada) > 0:
-        st.warning(f"⚠️ DERRUBADA NECESSÁRIA: {len(derrubada)} SKUs")
-
-    if len(armazenagem) > 0:
-        st.info(f"🏬 ARMAZENAGEM: {len(armazenagem)} SKUs precisam RE")
-
-    if len(ruptura)==0 and len(derrubada)==0 and len(armazenagem)==0:
-        st.success("🟢 OPERAÇÃO ESTÁVEL — sem riscos logísticos")
-
-    st.markdown("---")
-    st.markdown("## 🎯 Painel Executivo Operacional")
-
-    k1,k2,k3,k4 = st.columns(4)
-
-    k1.metric(
-        "🟢 Picking OK",
-        int((final["Status"]=="🟢 Picking").sum())
-    )
-
-    k2.metric(
-        "🟠 Derrubada",
-        int((final["Status"]=="🟠 Derrubada").sum())
-    )
-
-    k3.metric(
-        "🔵 Armazenagem",
-        int((final["Status"]=="🔵 Armazenagem").sum())
-    )
-
-    k4.metric(
-        "🔴 Ruptura",
-        int((final["Status"]=="🔴 Possível Ruptura").sum())
-    )
-
-    status_count = final["Status"].value_counts().reset_index()
-    status_count.columns = ["Status","Qtd"]
-
-    fig = px.pie(status_count, names="Status", values="Qtd", title="Distribuição logística")
-    st.plotly_chart(fig, width="stretch")
-
-# =========================================
-# 📊 VISÃO MACRO PEÇAS POR CATEGORIA
-# =========================================
-
-    st.markdown("---")
-    st.markdown("## 📊 Visão Macro de Peças por Categoria")
-
-    # soma peças por status
-    macro = final.groupby("Status")["pedido"].sum().reset_index()
-    macro.columns = ["Categoria","Peças em pedidos"]
-
-    # ordenar maior volume
-    macro = macro.sort_values(by="Peças em pedidos", ascending=False)
-
-    # KPIs executivos
-    c1, c2, c3, c4 = st.columns(4)
-
-    def get_val(cat):
-        val = macro.loc[macro["Categoria"]==cat, "Peças em pedidos"]
-        return int(val.values[0]) if len(val)>0 else 0
-
-    # gráfico barras
-    import plotly.express as px
-
-    fig_macro = px.bar(
-        macro,
-        x="Categoria",
-        y="Peças em pedidos",
-        text_auto=True,
-        title="Volume de peças por categoria operacional"
-    )
-
-    st.plotly_chart(fig_macro, width="stretch")
-
-    # gráfico pizza executivo
-    fig_pizza = px.pie(
-        macro,
-        names="Categoria",
-        values="Peças em pedidos",
-        title="Distribuição de carga operacional"
-    )
-
-    st.plotly_chart(fig_pizza, width="stretch")
-
-    st.markdown("---")
-    st.markdown("## 🚨 SKUs Críticos da Operação")
-
-    criticos = final[
-        (final["Status"]=="🟠 Derrubada") |
-        (final["Status"]=="🔵 Armazenagem") |
-        (final["Status"]=="🔴 Possível Ruptura")
-    ]
-
-    if len(criticos) > 0:
-        st.dataframe(criticos.sort_values("pedido", ascending=False), width="stretch")
-    else:
-        st.success("Nenhum SKU crítico 🎯")
-
-    
-# =========================================
-# 🧠 DERRUBADA INTELIGENTE PROFISSIONAL
-# =========================================
-
-    st.markdown("---")
-    st.markdown("## 🧠 Derrubada Inteligente (maior saldo / menos endereços)")
-
-    derrubada_df = final[final["Status"]=="🟠 Derrubada"]
-
-    if len(derrubada_df) == 0:
-        st.success("Nenhuma derrubada necessária")
-
-    else:
-
-        detalhes = estoque.copy()
-        detalhes["ref"] = detalhes["Produto"]
-
-        onda_final = []
-
-        for _, row in derrubada_df.iterrows():
-
-            ref = row["ref"]
-            pedido = row["pedido"]
-
-            posicoes = detalhes[
-                (detalhes["ref"]==ref) &
-                (detalhes["Área"]=="PP")
-            ].copy()
-
-            if len(posicoes) == 0:
-                continue
-
-            # 🔵 MAIOR SALDO PRIMEIRO (menos endereços)
-            posicoes = posicoes.sort_values(
-                by="QTD Disponível",
-                ascending=False
-            )
-
-            soma = 0
-            usados = 0
-
-            for _, p in posicoes.iterrows():
-
-                qtd = p["QTD Disponível"]
-                soma += qtd
-                usados += 1
-
-                onda_final.append({
-                    "Ref": ref,
-                    "Endereço": p["Endereço"],
-                    "UZ/Pallet": p["UZ/Pallet"],
-                    "Área": p["Área"],
-                    "Qtd endereço": qtd,
-                    "Pedido": pedido,
-                    "Acumulado": soma
-                })
-
-                # 🔴 parou ao atingir pedido
-                if soma >= pedido:
-                    break
-
-        onda_df = pd.DataFrame(onda_final)
-
-        st.warning(f"⚠️ {len(onda_df)} endereços necessários para atender pedidos")
-        st.dataframe(onda_df, width="stretch")
-
-    # =====================================
-    # EXCEL OPERACIONAL
-    # =====================================
-
-        import io
-        output = io.BytesIO()
-
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            onda_df.to_excel(writer, index=False, sheet_name="Derrubada")
-
-        excel_data = output.getvalue()
-
-        st.download_button(
-            label="📥 BAIXAR DERRUBADA OTIMIZADA CD",
-            data=excel_data,
-            file_name="derrubada_otimizada_cd.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    processar_operacao(PERGUNTA_ESTOQUE_LC, PERGUNTA_PEDIDOS_LC)
 
 if menu == "𝒜𝔭𝔭𝔯𝑜𝔳𝔢":
-    # =========================================
-    # FUNÇÃO CONSULTA METABASE
-    # =========================================
-    def puxar_pergunta(pergunta_id):
-
-        url = f"{METABASE_URL}/api/card/{pergunta_id}/query/json"
-
-        headers = {
-            "X-Metabase-Session": SESSION_TOKEN
-        }
-
-        response = requests.post(url, headers=headers)
-
-        if response.status_code != 200:
-            st.error(f"❌ Erro ao consultar pergunta {pergunta_id}")
-            st.stop()
-
-        data = response.json()
-        return pd.DataFrame(data)
-
-    # =========================================
-    # BOTÃO
-    # =========================================
-    if st.button("🔄 Atualizar dados"):
-        st.session_state["dados"] = True
-
-    if "dados" not in st.session_state:
-        st.info("Clique em atualizar dados")
-        st.stop()
-
-    # =========================================
-    # PUXAR DADOS
-    # =========================================
-    with st.spinner("Puxando dados do Metabase..."):
-        estoque = puxar_pergunta(PERGUNTA_ESTOQUE_APRV)
-        pedidos = puxar_pergunta(PERGUNTA_PEDIDOS_APRV)
-
-    st.success("Dados carregados!")
-
-    # =========================================
-    # LIMPEZA
-    # =========================================
-
-    estoque["QTD Disponível"] = pd.to_numeric(estoque["QTD Disponível"], errors="coerce").fillna(0)
-    pedidos["Soma de Qtd Atual"] = pd.to_numeric(pedidos["Soma de Qtd Atual"], errors="coerce").fillna(0)
-
-    estoque["UZ/Pallet"] = estoque["UZ/Pallet"]
-    estoque["ref"] = estoque["Produto"].astype(str)
-    pedidos["ref"] = pedidos["Referencia"].astype(str)
-
-    # =========================================
-    # ESTOQUE POR AREA
-    # =========================================
-
-    est = estoque.groupby(["ref","Área"])["QTD Disponível"].sum().reset_index()
-
-    pivot = est.pivot_table(
-        index="ref",
-        columns="Área",
-        values="QTD Disponível",
-        fill_value=0
-    ).reset_index()
-
-    for col in ["M0","MR","PP"]:
-        if col not in pivot.columns:
-            pivot[col] = 0
-
-    # =========================================
-    # PEDIDOS
-    # =========================================
-
-    ped = pedidos.groupby("ref")["Soma de Qtd Atual"].sum().reset_index()
-    ped.columns = ["ref","pedido"]
-
-    # =========================================
-    # JOIN
-    # =========================================
-
-    final = pivot.merge(ped, on="ref", how="left").fillna(0)
-
-    # =========================================
-    # CLASSIFICAÇÃO LOGÍSTICA
-    # =========================================
-
-    def classificar(row):
-
-        m0 = row.get("M0",0)
-        mr = row.get("MR",0)
-        pp = row.get("PP",0)
-        re = row.get("RE",0)
-        pedido = row["pedido"]
-
-        picking = m0 + mr
-        com_pp = picking + pp
-        com_re = com_pp + re
-
-        if pedido == 0:
-            return "Sem Pedido"
-
-        # atende só com picking
-        if picking >= pedido:
-            return "🟢 Picking"
-
-        # precisa derrubar PP
-        elif com_pp >= pedido:
-            return "🟠 Derrubada"
-
-        # precisa armazenagem RE
-        elif com_re >= pedido:
-            return "🔵 Armazenagem"
-
-        # nem assim atende
-        else:
-            return "🔴 Possível Ruptura"
-
-    final["Status"] = final.apply(classificar, axis=1)
-    final["Saldo_pos"] = (final["M0"] + final["MR"] + final["PP"]) - final["pedido"]
-
-    # =========================================
-    # 🚨 TORRE DE CONTROLE LOGÍSTICA
-    # =========================================
-
-    st.markdown("## 🚨 Torre de Controle Operacional")
-
-    ruptura = final[final["Status"]=="🔴 Possível Ruptura"]
-    derrubada = final[final["Status"]=="🟠 Derrubada"]
-    armazenagem = final[final["Status"]=="🔵 Armazenagem"]
-
-    if len(ruptura) > 0:
-        st.error(f"🚨 RUPTURA: {len(ruptura)} SKUs não atendem pedido")
-
-    if len(derrubada) > 0:
-        st.warning(f"⚠️ DERRUBADA NECESSÁRIA: {len(derrubada)} SKUs")
-
-    if len(armazenagem) > 0:
-        st.info(f"🏬 ARMAZENAGEM: {len(armazenagem)} SKUs precisam RE")
-
-    if len(ruptura)==0 and len(derrubada)==0 and len(armazenagem)==0:
-        st.success("🟢 OPERAÇÃO ESTÁVEL — sem riscos logísticos")
-
-    st.markdown("---")
-    st.markdown("## 🎯 Painel Executivo Operacional")
-
-    k1,k2,k3,k4 = st.columns(4)
-
-    k1.metric(
-        "🟢 Picking OK",
-        int((final["Status"]=="🟢 Picking").sum())
-    )
-
-    k2.metric(
-        "🟠 Derrubada",
-        int((final["Status"]=="🟠 Derrubada").sum())
-    )
-
-    k3.metric(
-        "🔵 Armazenagem",
-        int((final["Status"]=="🔵 Armazenagem").sum())
-    )
-
-    k4.metric(
-        "🔴 Ruptura",
-        int((final["Status"]=="🔴 Possível Ruptura").sum())
-    )
-
-    status_count = final["Status"].value_counts().reset_index()
-    status_count.columns = ["Status","Qtd"]
-
-    fig = px.pie(status_count, names="Status", values="Qtd", title="Distribuição logística")
-    st.plotly_chart(fig, width="stretch")
-
-# =========================================
-# 📊 VISÃO MACRO PEÇAS POR CATEGORIA
-# =========================================
-
-    st.markdown("---")
-    st.markdown("## 📊 Visão Macro de Peças por Categoria")
-
-    # soma peças por status
-    macro = final.groupby("Status")["pedido"].sum().reset_index()
-    macro.columns = ["Categoria","Peças em pedidos"]
-
-    # ordenar maior volume
-    macro = macro.sort_values(by="Peças em pedidos", ascending=False)
-
-    # KPIs executivos
-    c1, c2, c3, c4 = st.columns(4)
-
-    def get_val(cat):
-        val = macro.loc[macro["Categoria"]==cat, "Peças em pedidos"]
-        return int(val.values[0]) if len(val)>0 else 0
-
-    # gráfico barras
-    import plotly.express as px
-
-    fig_macro = px.bar(
-        macro,
-        x="Categoria",
-        y="Peças em pedidos",
-        text_auto=True,
-        title="Volume de peças por categoria operacional"
-    )
-
-    st.plotly_chart(fig_macro, width="stretch")
-
-    # gráfico pizza executivo
-    fig_pizza = px.pie(
-        macro,
-        names="Categoria",
-        values="Peças em pedidos",
-        title="Distribuição de carga operacional"
-    )
-
-    st.plotly_chart(fig_pizza, width="stretch")
-
-    st.markdown("---")
-    st.markdown("## 🚨 SKUs Críticos da Operação")
-
-    criticos = final[
-        (final["Status"]=="🟠 Derrubada") |
-        (final["Status"]=="🔵 Armazenagem") |
-        (final["Status"]=="🔴 Possível Ruptura")
-    ]
-
-    if len(criticos) > 0:
-        st.dataframe(criticos.sort_values("pedido", ascending=False), width="stretch")
-    else:
-        st.success("Nenhum SKU crítico 🎯")
-
-    
-# =========================================
-# 🧠 DERRUBADA INTELIGENTE PROFISSIONAL
-# =========================================
-
-    st.markdown("---")
-    st.markdown("## 🧠 Derrubada Inteligente (maior saldo / menos endereços)")
-
-    derrubada_df = final[final["Status"]=="🟠 Derrubada"]
-
-    if len(derrubada_df) == 0:
-        st.success("Nenhuma derrubada necessária")
-
-    else:
-
-        detalhes = estoque.copy()
-        detalhes["ref"] = detalhes["Produto"]
-
-        onda_final = []
-
-        for _, row in derrubada_df.iterrows():
-
-            ref = row["ref"]
-            pedido = row["pedido"]
-
-            posicoes = detalhes[
-                (detalhes["ref"]==ref) &
-                (detalhes["Área"]=="PP")
-            ].copy()
-
-            if len(posicoes) == 0:
-                continue
-
-            # 🔵 MAIOR SALDO PRIMEIRO (menos endereços)
-            posicoes = posicoes.sort_values(
-                by="QTD Disponível",
-                ascending=False
-            )
-
-            soma = 0
-            usados = 0
-
-            for _, p in posicoes.iterrows():
-
-                qtd = p["QTD Disponível"]
-                soma += qtd
-                usados += 1
-
-                onda_final.append({
-                    "Ref": ref,
-                    "Endereço": p["Endereço"],
-                    "UZ/Pallet": p["UZ/Pallet"],
-                    "Área": p["Área"],
-                    "Qtd endereço": qtd,
-                    "Pedido": pedido,
-                    "Acumulado": soma
-                })
-
-                # 🔴 parou ao atingir pedido
-                if soma >= pedido:
-                    break
-
-        onda_df = pd.DataFrame(onda_final)
-
-        st.warning(f"⚠️ {len(onda_df)} endereços necessários para atender pedidos")
-        st.dataframe(onda_df, width="stretch")
-
-    # =====================================
-    # EXCEL OPERACIONAL
-    # =====================================
-
-        import io
-        output = io.BytesIO()
-
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            onda_df.to_excel(writer, index=False, sheet_name="Derrubada")
-
-        excel_data = output.getvalue()
-
-        st.download_button(
-            label="📥 BAIXAR DERRUBADA OTIMIZADA CD",
-            data=excel_data,
-            file_name="derrubada_otimizada_cd.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-
+    processar_operacao(PERGUNTA_ESTOQUE_APRV, PERGUNTA_PEDIDOS_APRV)
