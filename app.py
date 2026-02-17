@@ -24,7 +24,7 @@ def add_bg_from_local(image_file):
 
     /* remove fundo branco dos blocos */
     .block-container {{
-        background-color: rgba(0,0,0,40);
+        background-color: rgba(0,0,0,60);
     }}
 
     /* sidebar leve transparente */
@@ -434,6 +434,7 @@ if menu == "🍲 Le Creuset":
 
 if menu == "𝒜𝔭𝔭𝔯𝑜𝔳𝔢":
     processar_operacao(PERGUNTA_ESTOQUE_APRV, PERGUNTA_PEDIDOS_APRV)
+
 
 
 
