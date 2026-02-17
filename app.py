@@ -29,7 +29,7 @@ def add_bg_from_local(image_file):
 
     /* sidebar leve transparente */
     section[data-testid="stSidebar"] {{
-        background-color: rgba(0,0,0,0.65);
+        background-color: rgba(0,0,0,0.25);
     }}
 
     </style>
@@ -434,6 +434,7 @@ if menu == "🍲 Le Creuset":
 
 if menu == "𝒜𝔭𝔭𝔯𝑜𝔳𝔢":
     processar_operacao(PERGUNTA_ESTOQUE_APRV, PERGUNTA_PEDIDOS_APRV)
+
 
 
 
