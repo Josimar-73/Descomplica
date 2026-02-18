@@ -5,39 +5,6 @@ import base64
 import plotly.express as px
 from config import *
 
-# =====================================================
-# 🎨 FUNDO PERSONALIZADO
-# =====================================================
-def add_bg_from_local(image_file):
-    with open(image_file, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode()
-
-    css = f"""
-    <style>
-    .stApp {{
-        background-image: url("data:image/png;base64,{encoded}");
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
-        background-attachment: fixed;
-    }}
-
-    /* remove fundo branco dos blocos */
-    .block-container {{
-        background-color: rgba(0,0,0,0);
-    }}
-
-    /* sidebar leve transparente */
-    section[data-testid="stSidebar"] {{
-        background-color: rgba(0,0,0,0.25);
-    }}
-
-    </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
-
-add_bg_from_local("fundo.png")
-
 st.set_page_config(layout="wide")
 st.title("𖠿 Descomplica")
 
@@ -434,6 +401,7 @@ if menu == "🍲 Le Creuset":
 
 if menu == "𝒜𝔭𝔭𝔯𝑜𝔳𝔢":
     processar_operacao(PERGUNTA_ESTOQUE_APRV, PERGUNTA_PEDIDOS_APRV)
+
 
 
 
